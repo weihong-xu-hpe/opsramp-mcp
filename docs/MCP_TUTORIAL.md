@@ -50,7 +50,7 @@ Add this to your VS Code MCP configuration (`settings.json` or `.vscode/mcp.json
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/weihong-xu-hpe/OPSRampMCP.git",
+        "git+https://github.com/weihong-xu-hpe/opsramp-mcp.git",
         "opsramp-mcp"
       ]
     }
@@ -82,8 +82,8 @@ id = "your_tenant_uuid"
 ### Option B: Clone and run locally
 
 ```bash
-git clone https://github.com/weihong-xu-hpe/OPSRampMCP.git
-cd OPSRampMCP
+git clone https://github.com/weihong-xu-hpe/opsramp-mcp.git
+cd opsramp-mcp
 uv sync
 cp config.example.toml config.toml
 # edit config.toml
@@ -118,7 +118,7 @@ Add to Claude Desktop MCP config:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/weihong-xu-hpe/OPSRampMCP.git",
+        "git+https://github.com/weihong-xu-hpe/opsramp-mcp.git",
         "opsramp-mcp"
       ]
     }
