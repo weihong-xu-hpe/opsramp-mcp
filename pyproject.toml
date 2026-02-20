@@ -1,0 +1,32 @@
+[project]
+name = "opsramp-mcp"
+version = "0.1.0"
+description = "FastMCP server for OpsRamp Dashboard and MetricsQL APIs (v2/v3)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "weihongxu" }
+]
+dependencies = [
+  "mcp[cli]>=1.26.0",
+  "httpx>=0.28.1",
+  "tomli>=2.0.1; python_version < '3.11'"
+]
+
+[project.scripts]
+opsramp-mcp = "opsramp_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opsramp_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/opsramp_mcp",
+  "README.md",
+  "pyproject.toml",
+  "config.example.toml"
+]

@@ -1,0 +1,44 @@
+# OpsRamp MCP Server Configuration
+# Copy this file to config.toml and fill in your values.
+#
+# Config search order:
+#   1. explicit path from CLI/tool argument
+#   2. ./opsramp.toml
+#   3. ./config.toml
+#   4. ~/.config/opsramp-mcp/config.toml
+#
+# Notes:
+# - TOML-only configuration (no environment-variable override path)
+# - "platform" is analogous to "cluster / OpsRamp instance"
+
+default_platform = "qa_glcp"
+
+[platforms.qa_glcp]
+api_base_url = "https://glcp-ccs-qa.api.opsramp.com"
+client_id = "your_client_id"
+client_secret = "your_client_secret"
+verify_tls = true
+timeout_seconds = 30
+default_tenant = "hoku"
+
+[platforms.qa_glcp.tenants.hoku]
+id = "f47e4413-1c7e-4bc0-86f4-022928c1c674"
+
+# Optional tenant-specific headers if your org requires them.
+#[platforms.qa_glcp.tenants.hoku.additional_headers]
+#X-MSP-ID = "msp_1234"
+#X-TENANT-ID = "f47e4413-1c7e-4bc0-86f4-022928c1c674"
+
+[platforms.prod_glcp]
+api_base_url = "https://your-prod-instance.api.opsramp.com"
+client_id = "prod_client_id"
+client_secret = "prod_client_secret"
+verify_tls = true
+timeout_seconds = 30
+default_tenant = "tenant_a"
+
+[platforms.prod_glcp.tenants.tenant_a]
+id = "tenant_a_uuid"
+
+[platforms.prod_glcp.tenants.tenant_b]
+id = "tenant_b_uuid"
