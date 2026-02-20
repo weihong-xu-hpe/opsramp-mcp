@@ -62,28 +62,28 @@ See `config.example.toml` for a complete template.
 Quick sample:
 
 ```toml
-default_platform = "qa_cluster"
+default_platform = "dev_cluster"
 
-[platforms.qa_cluster]
-api_base_url = "https://glcp-ccs-qa.api.opsramp.com"
+[platforms.dev_cluster]
+api_base_url = "https://your-dev-instance.api.opsramp.com"
 client_id = "..."
 client_secret = "..."
-default_tenant = "hoku"
+default_tenant = "tenant_dev"
 
-[platforms.qa_cluster.tenants.hoku]
-id = "f47e4413-1c7e-4bc0-86f4-022928c1c674"
+[platforms.dev_cluster.tenants.tenant_dev]
+id = "tenant_dev_uuid"
 
-[platforms.qa_cluster.tenants.dev]
-id = "tenant_uuid_2"
+[platforms.dev_cluster.tenants.tenant_test]
+id = "tenant_test_uuid"
 
 [platforms.prod_cluster]
-api_base_url = "https://prod-example.api.opsramp.com"
+api_base_url = "https://your-prod-instance.api.opsramp.com"
 client_id = "..."
 client_secret = "..."
-default_tenant = "finance"
+default_tenant = "tenant_prod"
 
-[platforms.prod_cluster.tenants.finance]
-id = "tenant_uuid_3"
+[platforms.prod_cluster.tenants.tenant_prod]
+id = "tenant_prod_uuid"
 ```
 
 ## Configuration policy

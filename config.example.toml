@@ -11,34 +11,34 @@
 # - TOML-only configuration (no environment-variable override path)
 # - "platform" is analogous to "cluster / OpsRamp instance"
 
-default_platform = "qa_glcp"
+default_platform = "dev_cluster"
 
-[platforms.qa_glcp]
-api_base_url = "https://glcp-ccs-qa.api.opsramp.com"
+[platforms.dev_cluster]
+api_base_url = "https://your-dev-instance.api.opsramp.com"
 client_id = "your_client_id"
 client_secret = "your_client_secret"
 verify_tls = true
 timeout_seconds = 30
-default_tenant = "hoku"
+default_tenant = "tenant_dev"
 
-[platforms.qa_glcp.tenants.hoku]
-id = "f47e4413-1c7e-4bc0-86f4-022928c1c674"
+[platforms.dev_cluster.tenants.tenant_dev]
+id = "tenant_dev_uuid"
 
 # Optional tenant-specific headers if your org requires them.
-#[platforms.qa_glcp.tenants.hoku.additional_headers]
+#[platforms.dev_cluster.tenants.tenant_dev.additional_headers]
 #X-MSP-ID = "msp_1234"
-#X-TENANT-ID = "f47e4413-1c7e-4bc0-86f4-022928c1c674"
+#X-TENANT-ID = "tenant_dev_uuid"
 
-[platforms.prod_glcp]
+[platforms.prod_cluster]
 api_base_url = "https://your-prod-instance.api.opsramp.com"
 client_id = "prod_client_id"
 client_secret = "prod_client_secret"
 verify_tls = true
 timeout_seconds = 30
-default_tenant = "tenant_a"
+default_tenant = "tenant_prod_a"
 
-[platforms.prod_glcp.tenants.tenant_a]
-id = "tenant_a_uuid"
+[platforms.prod_cluster.tenants.tenant_prod_a]
+id = "tenant_prod_a_uuid"
 
-[platforms.prod_glcp.tenants.tenant_b]
-id = "tenant_b_uuid"
+[platforms.prod_cluster.tenants.tenant_prod_b]
+id = "tenant_prod_b_uuid"

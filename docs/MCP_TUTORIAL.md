@@ -65,17 +65,17 @@ Then create config at:
 Example:
 
 ```toml
-default_platform = "qa_glcp"
+default_platform = "dev_cluster"
 
-[platforms.qa_glcp]
-api_base_url = "https://glcp-ccs-qa.api.opsramp.com"
+[platforms.dev_cluster]
+api_base_url = "https://your-dev-instance.api.opsramp.com"
 client_id = "your_client_id"
 client_secret = "your_client_secret"
 verify_tls = true
 timeout_seconds = 30
-default_tenant = "hoku"
+default_tenant = "tenant_dev"
 
-[platforms.qa_glcp.tenants.hoku]
+[platforms.dev_cluster.tenants.tenant_dev]
 id = "your_tenant_uuid"
 ```
 
