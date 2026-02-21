@@ -326,13 +326,13 @@ def _resolve_output_options(options: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+# @mcp.tool()
 async def opsramp_auth_test(ctx: Context[ServerSession, AppContext]) -> str:
     """Validate OAuth flow and return token metadata (masked)."""
     return await opsramp_auth_test_on_platform(ctx=ctx, platform="")
 
 
-@mcp.tool()
+# @mcp.tool()
 async def opsramp_auth_test_on_platform(
     ctx: Context[ServerSession, AppContext],
     platform: str = "",
@@ -357,7 +357,7 @@ async def opsramp_auth_test_on_platform(
     )
 
 
-@mcp.tool()
+# @mcp.tool()
 async def opsramp_list_platforms(ctx: Context[ServerSession, AppContext]) -> str:
     """List configured platforms and tenants from TOML config."""
     cfg = ctx.request_context.lifespan_context.config
@@ -389,7 +389,7 @@ async def opsramp_list_platforms(ctx: Context[ServerSession, AppContext]) -> str
     )
 
 
-@mcp.tool()
+# @mcp.tool()
 async def opsramp_server_info(ctx: Context[ServerSession, AppContext]) -> str:
     """Return server debug info including version and active config path."""
     cfg = ctx.request_context.lifespan_context.config
@@ -416,7 +416,10 @@ async def opsramp_dashboard_list_collections(
     offset: int | None = None,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """List dashboard collections (v3)."""
+    """
+    List all dashboard collections (folders) in OpsRamp. 
+    Use this FIRST when the user wants to find a dashboard but doesn't know the collection_id.
+    """
     platform_cfg = _platform_config(ctx, platform)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
     data = await _client_for_platform(ctx, platform_cfg.name).list_dashboard_collections_v3(
@@ -437,7 +440,10 @@ async def opsramp_dashboard_list_dashboards(
     offset: int | None = None,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """List dashboards under a collection (v3)."""
+    """
+    List all dashboards within a specific collection.
+    Use this after getting the collection_id to find the specific dashboard_id.
+    """
     platform_cfg = _platform_config(ctx, platform)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
     data = await _client_for_platform(ctx, platform_cfg.name).list_collection_dashboards_v3(
@@ -458,7 +464,10 @@ async def opsramp_dashboard_get(
     tenant: str = "",
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Get dashboard by collection and dashboard id (v3)."""
+    """
+    Get the full JSON configuration of a specific dashboard.
+    Use this to understand what charts/tiles are in the dashboard and their raw queries.
+    """
     platform_cfg = _platform_config(ctx, platform)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
     data = await _client_for_platform(ctx, platform_cfg.name).get_dashboard_v3(
@@ -479,7 +488,10 @@ async def opsramp_dashboard_get_variables(
     variables_map: dict[str, str] | None = None,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Get dashboard variables and build variables_map (defaults + overrides)."""
+    """
+    Extract dashboard variables and their default values.
+    Use this to see what parameters (like host, cluster) can be overridden before running the dashboard.
+    """
     platform_cfg = _platform_config(ctx, platform)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
     dashboard = await _client_for_platform(ctx, platform_cfg.name).get_dashboard_v3(
@@ -533,7 +545,16 @@ async def opsramp_dashboard_run_tiles_smart(
     output_options: dict[str, Any] | None = None,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Run all queryable dashboard tiles via smart MetricsQL and return tile data JSON."""
+    """
+    Execute all queries in a specific dashboard and return the data for all charts/tiles.
+    This is the primary tool to get actual monitoring data from a dashboard.
+    
+    Args:
+        start: Start time in epoch seconds (e.g., "1708473600") or relative time (e.g., "now-1h"). Default is "0".
+        end: End time in epoch seconds or relative time. Default is "0".
+        step: Resolution step in seconds (e.g., 60 for 1 minute).
+        variables_map: Optional dictionary to override dashboard template variables (e.g., {"host": "server-1"}).
+    """
     exec_options = _resolve_execution_options(execution_options)
     out_options = _resolve_output_options(output_options)
 
@@ -643,7 +664,10 @@ async def opsramp_metricsql_query(
     step: int = 60,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Run MetricsQL query (v3)."""
+    """
+    Run a standard PromQL/MetricsQL query.
+    Note: Prefer using opsramp_metricsql_query_smart for better reliability on large time ranges.
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -673,7 +697,16 @@ async def opsramp_metricsql_query_smart(
     max_points_per_slice: int = 8000,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Run a smart MetricsQL query with adaptive step and sharded fallback."""
+    """
+    Execute a PromQL/MetricsQL query against OpsRamp with built-in safety mechanisms (auto-downsampling and sharding).
+    ALWAYS PREFER THIS TOOL over the standard query tool for fetching time-series data, especially for large time ranges.
+    
+    Args:
+        query: The PromQL/MetricsQL query string.
+        start: Start time in epoch seconds (e.g., "1708473600").
+        end: End time in epoch seconds (e.g., "1708560000").
+        step: Resolution step in seconds (e.g., 60).
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -704,7 +737,10 @@ async def opsramp_metricsql_labels(
     offset: int | None = None,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """List available MetricsQL labels (v3)."""
+    """
+    Get a list of all available label keys (e.g., 'instance', 'job', 'tenant') in the time-series database.
+    Use this when you need to know what dimensions you can filter by.
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -734,7 +770,9 @@ async def opsramp_metricsql_label_values(
     offset: int | None = None,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """List metric names/values for a specific MetricsQL label (v3)."""
+    """
+    List all available values for a specific MetricsQL label (e.g., all available hostnames for the 'instance' label).
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -760,7 +798,10 @@ async def opsramp_metricsql_push_data(
     client_id: str = "",
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Push timeseries samples to MetricsQL ingest API (v3)."""
+    """
+    Push custom timeseries samples to the OpsRamp MetricsQL ingest API.
+    Use this to write mock data or custom metrics into the system.
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_client_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=client_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -787,7 +828,11 @@ async def opsramp_v2_list_metrics(
     page_size: int = 100,
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """List/search metrics using v2 endpoint."""
+    """
+    Search for available metric definitions and metadata in OpsRamp.
+    Use this when the user asks "what metrics are available for X" or wants to find the exact metric name to use in a query.
+    Supports fuzzy searching via query_string, metric_name, or display_name.
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -814,7 +859,9 @@ async def opsramp_v2_get_metric(
     tenant_id: str = "",
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """Get metric details by name using v2 endpoint."""
+    """
+    Get detailed metadata (unit, description, type) for a specific metric by its exact name.
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -838,7 +885,9 @@ async def opsramp_v2_list_reporting_apps(
     category: str = "",
     additional_headers: dict[str, str] | None = None,
 ) -> str:
-    """List available reporting apps via v2 endpoint (dashboard-related metadata)."""
+    """
+    List available reporting apps (dashboard-related metadata) via the v2 endpoint.
+    """
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
