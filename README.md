@@ -25,6 +25,10 @@ A Python FastMCP server for OpsRamp APIs, focused on:
 - List metric names under label: `GET /metricsql/api/v3/tenants/{tenantId}/metrics/labels/{label_name}`
 - Push time-series samples: `POST /metricsql/api/v3/tenants/{clientId}/metrics/data`
 
+### Tracing (v1)
+- Get top operations: `opsramp_tracing_top_operations` (Helper for `/tracing-query/api/v1/tenants/{tenantId}/top-operations`)
+- Get operation insights: `opsramp_tracing_operation_insights` (Helper for `/tracing-query/api/v1/tenants/{tenantId}/operation-insights`)
+
 ### v2 compatibility
 - List metrics: `GET /api/v2/tenants/{tenantId}/metrics`
 - Get metric by name: `GET /api/v2/tenants/{tenantId}/metrics/{metricName}`

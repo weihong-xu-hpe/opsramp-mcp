@@ -902,6 +902,90 @@ async def opsramp_v2_list_reporting_apps(
     return _json(data)
 
 
+@mcp.tool()
+async def opsramp_tracing_top_operations(
+    query: str,
+    start: str,
+    end: str,
+    ctx: Context[ServerSession, AppContext],
+    sort_by: str = "maxLatency",
+    platform: str = "",
+    tenant: str = "",
+    tenant_id: str = "",
+    additional_headers: dict[str, str] | None = None,
+) -> str:
+    """
+    Get top operations from OpsRamp Tracing.
+    Use this to find the most time-consuming or frequent operations within a specific service or app.
+    
+    Args:
+        query: Filter query, e.g., 'app IN ("default") AND service IN ("enforce")'
+        start: Start time in epoch nanoseconds (e.g., "1771677586270000000")
+        end: End time in epoch nanoseconds (e.g., "1771679386270000000")
+        sort_by: Field to sort by, default "maxLatency"
+    """
+    platform_cfg = _platform_config(ctx, platform)
+    resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
+    headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
+    data = await _client_for_platform(ctx, platform_cfg.name).get_tracing_top_operations(
+        tenant_id=resolved_tenant_id,
+        query=query,
+        start=start,
+        end=end,
+        sort_by=sort_by,
+        additional_headers=headers,
+    )
+    return _json(data)
+
+
+@mcp.tool()
+async def opsramp_tracing_operation_insights(
+    query: str,
+    start: str,
+    end: str,
+    ctx: Context[ServerSession, AppContext],
+    page_no: int = 1,
+    page_size: int = 100,
+    limit: int = 100,
+    sort_by: str = "averageLatency",
+    sort_by_option: str = "desc",
+    platform: str = "",
+    tenant: str = "",
+    tenant_id: str = "",
+    additional_headers: dict[str, str] | None = None,
+) -> str:
+    """
+    Get operation insights (latency, throughput, error rate) from OpsRamp Tracing.
+    Use this to get aggregated performance metrics for specific operations without writing complex PromQL queries.
+    
+    Args:
+        query: Filter query, e.g., 'app IN ("default") AND service IN ("enforce") AND operation IN ("GET /readyz")'
+        start: Start time in epoch nanoseconds (e.g., "1771677586270000000")
+        end: End time in epoch nanoseconds (e.g., "1771679386270000000")
+        page_no: Page number, default 1
+        page_size: Page size, default 100
+        limit: Limit, default 100
+        sort_by: Field to sort by, default "averageLatency"
+        sort_by_option: Sort direction, default "desc"
+    """
+    platform_cfg = _platform_config(ctx, platform)
+    resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
+    headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
+    data = await _client_for_platform(ctx, platform_cfg.name).get_tracing_operation_insights(
+        tenant_id=resolved_tenant_id,
+        query=query,
+        start=start,
+        end=end,
+        page_no=page_no,
+        page_size=page_size,
+        limit=limit,
+        sort_by=sort_by,
+        sort_by_option=sort_by_option,
+        additional_headers=headers,
+    )
+    return _json(data)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpsRamp MCP server")
     parser.add_argument(

@@ -434,6 +434,62 @@ class OpsRampClient:
         )
 
     # -----------------------------
+    # Tracing APIs (Reverse-engineered from UI)
+    # -----------------------------
+
+    async def get_tracing_top_operations(
+        self,
+        tenant_id: str,
+        query: str,
+        start: str,
+        end: str,
+        sort_by: str = "maxLatency",
+        additional_headers: dict[str, str] | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {
+            "query": query,
+            "start": start,
+            "end": end,
+            "sortBy": sort_by,
+        }
+        return await self._request(
+            "GET",
+            f"/tracing-query/api/v1/tenants/{tenant_id}/top-operations",
+            params=params,
+            additional_headers=additional_headers,
+        )
+
+    async def get_tracing_operation_insights(
+        self,
+        tenant_id: str,
+        query: str,
+        start: str,
+        end: str,
+        page_no: int = 1,
+        page_size: int = 100,
+        limit: int = 100,
+        sort_by: str = "averageLatency",
+        sort_by_option: str = "desc",
+        additional_headers: dict[str, str] | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {
+            "query": query,
+            "start": start,
+            "end": end,
+            "pageNo": page_no,
+            "pageSize": page_size,
+            "limit": limit,
+            "sortBy": sort_by,
+            "sortByOption": sort_by_option,
+        }
+        return await self._request(
+            "GET",
+            f"/tracing-query/api/v1/tenants/{tenant_id}/operation-insights",
+            params=params,
+            additional_headers=additional_headers,
+        )
+
+    # -----------------------------
     # v2 compatibility APIs
     # -----------------------------
 
