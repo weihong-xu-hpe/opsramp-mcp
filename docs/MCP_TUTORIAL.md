@@ -51,7 +51,9 @@ Add this to your VS Code MCP configuration (`settings.json` or `.vscode/mcp.json
       "args": [
         "--from",
         "git+https://github.com/weihong-xu-hpe/opsramp-mcp.git",
-        "opsramp-mcp"
+        "opsramp-mcp",
+        "--config",
+        "/absolute/path/to/your/config.toml"
       ]
     }
   }
@@ -119,7 +121,9 @@ Add to Claude Desktop MCP config:
       "args": [
         "--from",
         "git+https://github.com/weihong-xu-hpe/opsramp-mcp.git",
-        "opsramp-mcp"
+        "opsramp-mcp",
+        "--config",
+        "/absolute/path/to/your/config.toml"
       ]
     }
   }
