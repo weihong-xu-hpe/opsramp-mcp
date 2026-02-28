@@ -24,6 +24,7 @@ from .formatters import (
     build_tracing_query,
     classify_otel_span,
     ensure_nanoseconds,
+    extract_tracing_operations,
     format_dashboard_find,
     format_dashboard_tiles,
     format_metricsql_batch,
@@ -1102,17 +1103,11 @@ async def opsramp_tracing_operation_insights(
     )
 
     # Auto-tag otel_cat on each operation
-    if isinstance(data, list):
-        ops = data
-    elif isinstance(data, dict):
-        ops = data.get("data", data.get("operations", []))
-    else:
-        ops = []
-    if isinstance(ops, list):
-        for op in ops:
-            if isinstance(op, dict):
-                name = op.get("operationName", op.get("operation", ""))
-                op["otel_cat"] = classify_otel_span(name)
+    ops = extract_tracing_operations(data)
+    for op in ops:
+        if isinstance(op, dict):
+            name = op.get("operationName", op.get("operation", ""))
+            op["otel_cat"] = classify_otel_span(name)
 
     return format_tracing_insights(data, fmt, meta={
         "tenant": tenant or platform_cfg.default_tenant,
@@ -1280,17 +1275,11 @@ async def opsramp_tracing_batch_insights(
                     additional_headers=headers,
                 )
                 # Extract operations list
-                if isinstance(data, list):
-                    ops = data
-                elif isinstance(data, dict):
-                    ops = data.get("data", data.get("operations", []))
-                else:
-                    ops = []
-                if isinstance(ops, list):
-                    for op in ops:
-                        if isinstance(op, dict):
-                            name = op.get("operationName", op.get("operation", ""))
-                            op["otel_cat"] = classify_otel_span(name)
+                ops = extract_tracing_operations(data)
+                for op in ops:
+                    if isinstance(op, dict):
+                        name = op.get("operationName", op.get("operation", ""))
+                        op["otel_cat"] = classify_otel_span(name)
                 return {"id": qid, "status": "ok", "operations": ops}
             except OpsRampAPIError as exc:
                 return {"id": qid, "status": "error", "error": f"{exc.status_code} {exc.details}"}

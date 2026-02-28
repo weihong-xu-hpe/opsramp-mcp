@@ -61,7 +61,7 @@ def format_tracing_insights(
     """Format a single tracing operation_insights response."""
     if fmt == "json":
         return _json(data)
-    ops = _extract_tracing_operations(data)
+    ops = extract_tracing_operations(data)
     header_comment = _tracing_header(meta, ops)
     if fmt == "text":
         return _tracing_text(ops, header_comment)
@@ -443,10 +443,25 @@ def _metricsql_batch_text(results: list[dict[str, Any]], header: str) -> str:
 # Internal: Tracing formatters
 # ---------------------------------------------------------------------------
 
-def _extract_tracing_operations(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract operations list from tracing insights response."""
+def extract_tracing_operations(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract operations list from tracing insights response.
+
+    The API returns a nested structure:
+        {"apps": {"default": {"services": {"<svc>": {"operations": [...]}}}}}
+    We also handle flat formats for forward compatibility.
+    """
     if isinstance(data, list):
         return data
+    # Try nested apps.*.services.*.operations (actual API format)
+    apps = data.get("apps", {})
+    if isinstance(apps, dict):
+        for app_val in apps.values():
+            services = app_val.get("services", {}) if isinstance(app_val, dict) else {}
+            for svc_val in services.values():
+                ops = svc_val.get("operations", []) if isinstance(svc_val, dict) else []
+                if isinstance(ops, list) and ops:
+                    return ops
+    # Try flat formats
     ops = data.get("data", data.get("operations", []))
     if isinstance(ops, list):
         return ops
