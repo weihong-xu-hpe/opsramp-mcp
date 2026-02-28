@@ -8,3 +8,6 @@ opsramp.toml
 .dist/
 dist/
 *.log
+
+# Design docs (local only)
+docs/design/
