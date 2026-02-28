@@ -1,6 +1,6 @@
 [project]
 name = "opsramp-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "FastMCP server for OpsRamp Dashboard and MetricsQL APIs (v2/v3)"
 readme = "README.md"
 requires-python = ">=3.10"

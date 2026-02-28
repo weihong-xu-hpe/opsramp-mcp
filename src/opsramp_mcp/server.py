@@ -7,6 +7,7 @@ import asyncio
 import json
 import re
 import sys
+import time as _time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -18,6 +19,20 @@ from mcp.server.session import ServerSession
 from . import __version__
 from .client import OpsRampAPIError, OpsRampClient
 from .config import AppConfig, PlatformConfig, load_config
+from .formatters import (
+    auto_step,
+    build_tracing_query,
+    classify_otel_span,
+    ensure_nanoseconds,
+    format_dashboard_find,
+    format_dashboard_tiles,
+    format_metricsql_batch,
+    format_metricsql_result,
+    format_tracing_batch,
+    format_tracing_insights,
+    parse_time_range,
+    rewrite_otel_labels,
+)
 
 
 @dataclass
@@ -105,6 +120,41 @@ def _resolve_headers(
 
 def _json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+_VALID_OUTPUT_FORMATS = {"csv", "text", "json"}
+
+
+def _validate_output_format(fmt: str) -> str:
+    """Normalize and validate output_format parameter."""
+    fmt = fmt.strip().lower()
+    if fmt not in _VALID_OUTPUT_FORMATS:
+        fmt = "csv"
+    return fmt
+
+
+def _resolve_time_range_params(
+    time_range: str,
+    start: str,
+    end: str,
+    step: int,
+) -> tuple[str, str, int]:
+    """Resolve time_range into (start, end, step).
+
+    If time_range is set and start/end are defaults ('0' or ''),
+    compute them from now. Otherwise pass through original values.
+    Returns (start, end, step).
+    """
+    duration = parse_time_range(time_range)
+    start_is_default = start.strip() in ("", "0")
+    end_is_default = end.strip() in ("", "0")
+    if duration is not None and start_is_default and end_is_default:
+        now = int(_time.time())
+        resolved_start = str(now - duration)
+        resolved_end = str(now)
+        resolved_step = step if step > 0 else auto_step(duration)
+        return resolved_start, resolved_end, resolved_step
+    return start, end, step
 
 
 _VAR_PATTERN = re.compile(r"\$([A-Za-z_]\w*)|\$\{([^}]+)\}")
@@ -407,7 +457,8 @@ async def opsramp_server_info(ctx: Context[ServerSession, AppContext]) -> str:
     )
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — replaced by dashboard_find
+# @mcp.tool()
 async def opsramp_dashboard_list_collections(
     ctx: Context[ServerSession, AppContext],
     platform: str = "",
@@ -430,7 +481,8 @@ async def opsramp_dashboard_list_collections(
     return _json(data)
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — replaced by dashboard_find
+# @mcp.tool()
 async def opsramp_dashboard_list_dashboards(
     collection_id: str,
     ctx: Context[ServerSession, AppContext],
@@ -455,7 +507,8 @@ async def opsramp_dashboard_list_dashboards(
     return _json(data)
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — use dashboard_run_tiles_smart or dashboard_get_variables
+# @mcp.tool()
 async def opsramp_dashboard_get(
     collection_id: str,
     dashboard_id: str,
@@ -540,6 +593,8 @@ async def opsramp_dashboard_run_tiles_smart(
     start: str = "0",
     end: str = "0",
     step: int = 60,
+    time_range: str = "",
+    output_format: str = "csv",
     variables_map: dict[str, str] | None = None,
     execution_options: dict[str, Any] | None = None,
     output_options: dict[str, Any] | None = None,
@@ -553,8 +608,12 @@ async def opsramp_dashboard_run_tiles_smart(
         start: Start time in epoch seconds (e.g., "1708473600") or relative time (e.g., "now-1h"). Default is "0".
         end: End time in epoch seconds or relative time. Default is "0".
         step: Resolution step in seconds (e.g., 60 for 1 minute).
+        time_range: Human time range like "24h", "1h", "7d" — auto-computes start/end/step.
+        output_format: "csv" (default), "text" (human-readable), or "json" (raw).
         variables_map: Optional dictionary to override dashboard template variables (e.g., {"host": "server-1"}).
     """
+    fmt = _validate_output_format(output_format)
+    start, end, step = _resolve_time_range_params(time_range, start, end, step)
     exec_options = _resolve_execution_options(execution_options)
     out_options = _resolve_output_options(output_options)
 
@@ -649,10 +708,15 @@ async def opsramp_dashboard_run_tiles_smart(
     }
     if out_options["include_dashboard"]:
         response["dashboard"] = dashboard
-    return _json(response)
+    return format_dashboard_tiles(response, fmt, meta={
+        "tenant": tenant or platform_cfg.default_tenant,
+        "time_range": time_range,
+        "step": step,
+    })
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — use query_smart instead
+# @mcp.tool()
 async def opsramp_metricsql_query(
     query: str,
     ctx: Context[ServerSession, AppContext],
@@ -692,6 +756,9 @@ async def opsramp_metricsql_query_smart(
     start: str = "0",
     end: str = "0",
     step: int = 60,
+    time_range: str = "",
+    output_format: str = "csv",
+    rewrite_otel_labels_flag: bool = True,
     auto_downsample: bool = True,
     enable_sharding: bool = True,
     max_points_per_slice: int = 8000,
@@ -702,11 +769,23 @@ async def opsramp_metricsql_query_smart(
     ALWAYS PREFER THIS TOOL over the standard query tool for fetching time-series data, especially for large time ranges.
     
     Args:
-        query: The PromQL/MetricsQL query string.
+        query: The PromQL/MetricsQL query string. Label aliases (container, pod, namespace)
+               are auto-rewritten to OTel names (k8s_container_name, etc.) unless disabled.
         start: Start time in epoch seconds (e.g., "1708473600").
         end: End time in epoch seconds (e.g., "1708560000").
         step: Resolution step in seconds (e.g., 60).
+        time_range: Human time range like "24h", "1h", "7d" — auto-computes start/end/step.
+                    Ignored if start/end are explicitly set.
+        output_format: "csv" (default, most token-efficient), "text" (human-readable),
+                       or "json" (full raw response, backward-compatible).
+        rewrite_otel_labels_flag: If True (default), rewrite short label aliases to OTel names.
     """
+    fmt = _validate_output_format(output_format)
+    start, end, step = _resolve_time_range_params(time_range, start, end, step)
+
+    if rewrite_otel_labels_flag:
+        query = rewrite_otel_labels(query)
+
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
@@ -721,7 +800,11 @@ async def opsramp_metricsql_query_smart(
         max_points_per_slice=max_points_per_slice,
         additional_headers=headers,
     )
-    return _json(data)
+    return format_metricsql_result(data, fmt, meta={
+        "tenant": tenant or platform_cfg.default_tenant,
+        "time_range": time_range,
+        "effective_step": step,
+    })
 
 
 @mcp.tool()
@@ -789,7 +872,8 @@ async def opsramp_metricsql_label_values(
     return _json(data)
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — write operation, out of scope
+# @mcp.tool()
 async def opsramp_metricsql_push_data(
     payload: list[dict[str, Any]],
     ctx: Context[ServerSession, AppContext],
@@ -873,7 +957,8 @@ async def opsramp_v2_get_metric(
     return _json(data)
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — zero usage
+# @mcp.tool()
 async def opsramp_v2_list_reporting_apps(
     ctx: Context[ServerSession, AppContext],
     platform: str = "",
@@ -902,7 +987,8 @@ async def opsramp_v2_list_reporting_apps(
     return _json(data)
 
 
-@mcp.tool()
+# Deregistered in v0.2.0 — replaced by operation_insights
+# @mcp.tool()
 async def opsramp_tracing_top_operations(
     query: str,
     start: str,
@@ -940,10 +1026,15 @@ async def opsramp_tracing_top_operations(
 
 @mcp.tool()
 async def opsramp_tracing_operation_insights(
-    query: str,
-    start: str,
-    end: str,
     ctx: Context[ServerSession, AppContext],
+    query: str = "",
+    service: str = "",
+    kind: str = "",
+    operation: str = "",
+    start: str = "",
+    end: str = "",
+    time_range: str = "",
+    output_format: str = "csv",
     page_no: int = 1,
     page_size: int = 100,
     limit: int = 100,
@@ -958,22 +1049,48 @@ async def opsramp_tracing_operation_insights(
     Get operation insights (latency, throughput, error rate) from OpsRamp Tracing.
     Use this to get aggregated performance metrics for specific operations without writing complex PromQL queries.
     
+    OpsRamp platform details handled automatically:
+    - app IN ("default") is always injected when using structured params
+    - Time is always converted to epoch nanoseconds
+    - Each operation is auto-tagged with otel_cat (db/sql, db/redis, http, grpc, internal)
+    
     Args:
-        query: Filter query, e.g., 'app IN ("default") AND service IN ("enforce") AND operation IN ("GET /readyz")'
-        start: Start time in epoch nanoseconds (e.g., "1771677586270000000")
-        end: End time in epoch nanoseconds (e.g., "1771679386270000000")
-        page_no: Page number, default 1
-        page_size: Page size, default 100
-        limit: Limit, default 100
-        sort_by: Field to sort by, default "averageLatency"
-        sort_by_option: Sort direction, default "desc"
+        query: Raw filter DSL. If provided, takes priority over structured params.
+        service: Service name (e.g., "enforce"). Auto-builds query DSL if set.
+        kind: Optional kind filter: "server", "client", or "internal".
+        operation: Optional exact operation name filter.
+        start: Start time (epoch seconds or nanoseconds — auto-detected).
+        end: End time (epoch seconds or nanoseconds — auto-detected).
+        time_range: Human time range like "24h" — auto-computes start/end.
+        output_format: "csv" (default), "text", or "json".
+        sort_by: Field to sort by, default "averageLatency".
     """
+    fmt = _validate_output_format(output_format)
+
+    # Build query DSL
+    effective_query = query.strip()
+    if not effective_query:
+        effective_query = build_tracing_query(service=service, kind=kind, operation=operation)
+
+    # Resolve time range
+    duration = parse_time_range(time_range)
+    start_is_default = not start.strip()
+    end_is_default = not end.strip()
+    if duration is not None and start_is_default and end_is_default:
+        now = int(_time.time())
+        start = str(now - duration)
+        end = str(now)
+
+    # Auto-convert to nanoseconds
+    start = ensure_nanoseconds(start)
+    end = ensure_nanoseconds(end)
+
     platform_cfg = _platform_config(ctx, platform)
     resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
     data = await _client_for_platform(ctx, platform_cfg.name).get_tracing_operation_insights(
         tenant_id=resolved_tenant_id,
-        query=query,
+        query=effective_query,
         start=start,
         end=end,
         page_no=page_no,
@@ -983,7 +1100,271 @@ async def opsramp_tracing_operation_insights(
         sort_by_option=sort_by_option,
         additional_headers=headers,
     )
-    return _json(data)
+
+    # Auto-tag otel_cat on each operation
+    if isinstance(data, list):
+        ops = data
+    elif isinstance(data, dict):
+        ops = data.get("data", data.get("operations", []))
+    else:
+        ops = []
+    if isinstance(ops, list):
+        for op in ops:
+            if isinstance(op, dict):
+                name = op.get("operationName", op.get("operation", ""))
+                op["otel_cat"] = classify_otel_span(name)
+
+    return format_tracing_insights(data, fmt, meta={
+        "tenant": tenant or platform_cfg.default_tenant,
+        "service": service,
+        "kind": kind,
+        "time_range": time_range,
+        "sort_by": sort_by,
+    })
+
+
+# ---------------------------------------------------------------------------
+# New batch / find tools (v0.2.0)
+# ---------------------------------------------------------------------------
+
+_BATCH_SEMAPHORE_LIMIT = 4
+
+
+@mcp.tool()
+async def opsramp_metricsql_batch_query(
+    queries: list[dict[str, str]],
+    ctx: Context[ServerSession, AppContext],
+    platform: str = "",
+    tenant: str = "",
+    tenant_id: str = "",
+    time_range: str = "",
+    start: str = "0",
+    end: str = "0",
+    step: int = 0,
+    output_format: str = "csv",
+    rewrite_otel_labels_flag: bool = True,
+    additional_headers: dict[str, str] | None = None,
+) -> str:
+    """
+    Execute multiple PromQL queries in one call with parallel execution.
+    Returns compact results keyed by query ID.
+    
+    Args:
+        queries: List of {"id": "unique-name", "query": "promql..."}.
+                 Label aliases (container, pod, namespace) are auto-rewritten
+                 to OTel names (k8s_container_name, etc.) unless disabled.
+        time_range: Human time range like "24h", "1h", "7d" — auto-computes
+                    start/end/step. Ignored if start/end are explicitly set.
+        output_format: "csv" (default, most token-efficient), "text" (human-readable),
+                       or "json" (full raw response, backward-compatible).
+    """
+    fmt = _validate_output_format(output_format)
+    start, end, step = _resolve_time_range_params(time_range, start, end, step)
+
+    platform_cfg = _platform_config(ctx, platform)
+    resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
+    headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
+    client = _client_for_platform(ctx, platform_cfg.name)
+
+    semaphore = asyncio.Semaphore(_BATCH_SEMAPHORE_LIMIT)
+
+    async def run_one(item: dict[str, str]) -> dict[str, Any]:
+        qid = item.get("id", "unnamed")
+        raw_query = item.get("query", "")
+        if rewrite_otel_labels_flag:
+            raw_query = rewrite_otel_labels(raw_query)
+        async with semaphore:
+            try:
+                data = await client.query_metricsql_v3_smart(
+                    tenant_id=resolved_tenant_id,
+                    query=raw_query,
+                    start=start,
+                    end=end,
+                    step=step,
+                    additional_headers=headers,
+                )
+                series = []
+                d = data.get("data", {}) if isinstance(data, dict) else {}
+                if isinstance(d, dict):
+                    series = d.get("result", [])
+                return {"id": qid, "status": "ok", "series": series, "data": data}
+            except OpsRampAPIError as exc:
+                return {"id": qid, "status": "error", "error": f"{exc.status_code} {exc.details}"}
+            except Exception as exc:
+                return {"id": qid, "status": "error", "error": str(exc)}
+
+    results = await asyncio.gather(*(run_one(q) for q in queries))
+    results_list = list(results)
+    return format_metricsql_batch(results_list, fmt, meta={
+        "tenant": tenant or platform_cfg.default_tenant,
+        "time_range": time_range,
+        "effective_step": step,
+    })
+
+
+@mcp.tool()
+async def opsramp_tracing_batch_insights(
+    queries: list[dict[str, Any]],
+    ctx: Context[ServerSession, AppContext],
+    platform: str = "",
+    tenant: str = "",
+    tenant_id: str = "",
+    time_range: str = "",
+    start: str = "",
+    end: str = "",
+    output_format: str = "csv",
+    additional_headers: dict[str, str] | None = None,
+) -> str:
+    """
+    Execute multiple tracing operation_insights queries in one call.
+    
+    Args:
+        queries: List of structured query dicts, each with:
+            - "id": unique name (e.g., "enforce-server")
+            - "service": service name (e.g., "enforce")
+            - "kind": optional, "server" | "client" | "internal"
+            - "operation": optional, exact operation name filter
+            - "sort_by": optional, default "throughput"
+            - "limit": optional, default 10
+        time_range: "24h" etc. Auto-converts to nanoseconds internally.
+        output_format: "csv" | "text" | "json"
+    
+    OpsRamp platform details handled automatically:
+        - app IN ("default") is always injected
+        - Time is always converted to epoch nanoseconds
+        - Each operation is auto-tagged with otel_cat (db/sql, db/redis, http, grpc, internal)
+    """
+    fmt = _validate_output_format(output_format)
+
+    # Resolve time
+    duration = parse_time_range(time_range)
+    start_is_default = not start.strip()
+    end_is_default = not end.strip()
+    if duration is not None and start_is_default and end_is_default:
+        now = int(_time.time())
+        start = str(now - duration)
+        end = str(now)
+
+    ns_start = ensure_nanoseconds(start)
+    ns_end = ensure_nanoseconds(end)
+
+    platform_cfg = _platform_config(ctx, platform)
+    resolved_tenant_id = _resolve_tenant_id(platform_cfg, tenant=tenant, tenant_id=tenant_id)
+    headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
+    client = _client_for_platform(ctx, platform_cfg.name)
+
+    semaphore = asyncio.Semaphore(_BATCH_SEMAPHORE_LIMIT)
+
+    async def run_one(item: dict[str, Any]) -> dict[str, Any]:
+        qid = item.get("id", "unnamed")
+        service = item.get("service", "")
+        kind = item.get("kind", "")
+        operation = item.get("operation", "")
+        sort_by = item.get("sort_by", "throughput")
+        limit = item.get("limit", 10)
+
+        query_dsl = build_tracing_query(service=service, kind=kind, operation=operation)
+
+        async with semaphore:
+            try:
+                data = await client.get_tracing_operation_insights(
+                    tenant_id=resolved_tenant_id,
+                    query=query_dsl,
+                    start=ns_start,
+                    end=ns_end,
+                    page_no=1,
+                    page_size=limit,
+                    limit=limit,
+                    sort_by=sort_by,
+                    sort_by_option="desc",
+                    additional_headers=headers,
+                )
+                # Extract operations list
+                if isinstance(data, list):
+                    ops = data
+                elif isinstance(data, dict):
+                    ops = data.get("data", data.get("operations", []))
+                else:
+                    ops = []
+                if isinstance(ops, list):
+                    for op in ops:
+                        if isinstance(op, dict):
+                            name = op.get("operationName", op.get("operation", ""))
+                            op["otel_cat"] = classify_otel_span(name)
+                return {"id": qid, "status": "ok", "operations": ops}
+            except OpsRampAPIError as exc:
+                return {"id": qid, "status": "error", "error": f"{exc.status_code} {exc.details}"}
+            except Exception as exc:
+                return {"id": qid, "status": "error", "error": str(exc)}
+
+    results = await asyncio.gather(*(run_one(q) for q in queries))
+    results_list = list(results)
+    return format_tracing_batch(results_list, fmt, meta={
+        "tenant": tenant or platform_cfg.default_tenant,
+        "time_range": time_range,
+    })
+
+
+@mcp.tool()
+async def opsramp_dashboard_find(
+    search: str,
+    ctx: Context[ServerSession, AppContext],
+    platform: str = "",
+    tenant: str = "",
+    additional_headers: dict[str, str] | None = None,
+) -> str:
+    """
+    Search for dashboards by name (fuzzy match across all collections).
+    Returns matching collection_id + dashboard_id pairs ready for use
+    with dashboard_run_tiles_smart or dashboard_get_variables.
+    
+    Args:
+        search: Dashboard name to search for (case-insensitive substring match).
+                E.g., "enforce", "AuthZ Overview", "CPU"
+    """
+    platform_cfg = _platform_config(ctx, platform)
+    headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
+    client = _client_for_platform(ctx, platform_cfg.name)
+
+    # Fetch all collections
+    collections = await client.list_dashboard_collections_v3(additional_headers=headers)
+    if not isinstance(collections, list):
+        collections = collections.get("data", []) if isinstance(collections, dict) else []
+
+    semaphore = asyncio.Semaphore(_BATCH_SEMAPHORE_LIMIT)
+    search_lower = search.lower()
+
+    async def search_collection(coll: dict[str, Any]) -> list[dict[str, str]]:
+        coll_id = str(coll.get("id", ""))
+        coll_title = str(coll.get("title", coll.get("name", "")))
+        async with semaphore:
+            try:
+                dashboards = await client.list_collection_dashboards_v3(
+                    collection_id=coll_id, additional_headers=headers,
+                )
+                if not isinstance(dashboards, list):
+                    dashboards = dashboards.get("data", []) if isinstance(dashboards, dict) else []
+            except Exception:
+                return []
+        matches = []
+        for d in dashboards:
+            if not isinstance(d, dict):
+                continue
+            title = str(d.get("title", d.get("name", "")))
+            if search_lower in title.lower():
+                matches.append({
+                    "collection_id": coll_id,
+                    "collection_title": coll_title,
+                    "dashboard_id": str(d.get("id", "")),
+                    "dashboard_title": title,
+                })
+        return matches
+
+    all_results = await asyncio.gather(*(search_collection(c) for c in collections if isinstance(c, dict)))
+    flat_matches: list[dict[str, str]] = []
+    for m in all_results:
+        flat_matches.extend(m)
+    return format_dashboard_find(flat_matches, search)
 
 
 def main() -> None:
