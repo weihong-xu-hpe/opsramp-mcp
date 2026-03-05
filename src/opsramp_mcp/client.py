@@ -108,7 +108,16 @@ class OpsRampClient:
         if additional_headers:
             headers.update(additional_headers)
 
-        resp = await self._http_client.request(method, path, params=params, json=json_body, headers=headers)
+        try:
+            resp = await self._http_client.request(method, path, params=params, json=json_body, headers=headers)
+        except httpx.HTTPError as exc:
+            raise OpsRampAPIError(
+                message=f"OpsRamp API transport error: {method} {path}",
+                details={
+                    "exception_type": type(exc).__name__,
+                    "error": _describe_http_error(exc),
+                },
+            ) from exc
 
         if resp.status_code >= 400:
             raise OpsRampAPIError(
@@ -572,6 +581,14 @@ def _safe_body(resp: httpx.Response) -> Any:
         return resp.json()
     except ValueError:
         return resp.text
+
+
+def _describe_http_error(exc: httpx.HTTPError) -> str:
+    """Return a stable, non-empty message for httpx transport/protocol errors."""
+    text = str(exc).strip()
+    if text:
+        return text
+    return repr(exc)
 
 
 def _parse_epoch_seconds(value: str | None) -> int | None:

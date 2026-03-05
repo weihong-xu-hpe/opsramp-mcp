@@ -11,6 +11,7 @@ from opsramp_mcp.server import (
     _resolve_time_range_params,
     _parse_epoch_seconds,
     _duration_seconds,
+    _error_text,
 )
 
 
@@ -94,3 +95,16 @@ class TestDurationSeconds:
 
     def test_invalid_start(self):
         assert _duration_seconds("abc", "2000") is None
+
+
+class TestErrorText:
+    def test_non_empty_passthrough(self):
+        assert _error_text(ValueError("boom")) == "boom"
+
+    def test_empty_exception_gets_fallback(self):
+        class SilentError(Exception):
+            pass
+
+        text = _error_text(SilentError())
+        assert "SilentError" in text
+        assert text.strip()

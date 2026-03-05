@@ -123,6 +123,14 @@ def _json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def _error_text(exc: BaseException) -> str:
+    """Return a non-empty, user-facing exception string."""
+    msg = str(exc).strip()
+    if msg:
+        return msg
+    return f"{type(exc).__name__}: {repr(exc)}"
+
+
 _VALID_OUTPUT_FORMATS = {"csv", "text", "json"}
 
 
@@ -1186,7 +1194,7 @@ async def opsramp_metricsql_batch_query(
             except OpsRampAPIError as exc:
                 return {"id": qid, "status": "error", "error": f"{exc.status_code} {exc.details}"}
             except Exception as exc:
-                return {"id": qid, "status": "error", "error": str(exc)}
+                return {"id": qid, "status": "error", "error": _error_text(exc)}
 
     results = await asyncio.gather(*(run_one(q) for q in queries))
     results_list = list(results)
@@ -1284,7 +1292,7 @@ async def opsramp_tracing_batch_insights(
             except OpsRampAPIError as exc:
                 return {"id": qid, "status": "error", "error": f"{exc.status_code} {exc.details}"}
             except Exception as exc:
-                return {"id": qid, "status": "error", "error": str(exc)}
+                return {"id": qid, "status": "error", "error": _error_text(exc)}
 
     results = await asyncio.gather(*(run_one(q) for q in queries))
     results_list = list(results)
