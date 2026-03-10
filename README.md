@@ -23,11 +23,12 @@ A Python FastMCP server for OpsRamp APIs, focused on:
 | 4 | `opsramp_metricsql_label_values` | MetricsQL | List values for a specific label |
 | 5 | `opsramp_tracing_operation_insights` | Tracing | Operation insights with structured params, auto DSL & OTel classification |
 | 6 | `opsramp_tracing_batch_insights` | Tracing | Parallel tracing insights across multiple services/operations |
-| 7 | `opsramp_dashboard_run_tiles_smart` | Dashboard | Execute all tile queries with variable resolution |
-| 8 | `opsramp_dashboard_find` | Dashboard | Fuzzy search dashboards across all collections |
-| 9 | `opsramp_dashboard_get_variables` | Dashboard | Get dashboard variable definitions |
-| 10 | `opsramp_v2_list_metrics` | v2 compat | List metric definitions |
-| 11 | `opsramp_v2_get_metric` | v2 compat | Get a single metric definition |
+| 7 | `opsramp_service_performance_aggregator` | Tracing | Instant service health map: queries MQ, SQL, HTTP_OUT and traffic bounds concurrently |
+| 8 | `opsramp_dashboard_run_tiles_smart` | Dashboard | Execute all tile queries with variable resolution |
+| 9 | `opsramp_dashboard_find` | Dashboard | Fuzzy search dashboards across all collections |
+| 10 | `opsramp_dashboard_get_variables` | Dashboard | Get dashboard variable definitions |
+| 11 | `opsramp_v2_list_metrics` | v2 compat | List metric definitions |
+| 12 | `opsramp_v2_get_metric` | v2 compat | Get a single metric definition |
 
 ### Key features in v0.2.0
 

@@ -660,3 +660,56 @@ def _dashboard_text(tiles: list[dict[str, Any]], header: str) -> str:
 
 def _json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+def format_service_performance(
+    service_name: str,
+    results_map: dict[str, list[dict[str, Any]]],
+    fmt: str = "csv"
+) -> str:
+    """Format aggregated service performance data."""
+    if fmt == "json":
+        return _json({service_name: results_map})
+        
+    lines = []
+    lines.append(f"# Service Performance: {service_name}")
+    lines.append("Dependency_Type,Target_Peer,Operation,Transaction_Category,Data_Points,Throughput_Rate")
+    
+    for dep_type, series_list in results_map.items():
+        if not series_list:
+            continue
+            
+        for s in series_list:
+            if "error" in s:
+                lines.append(f"{dep_type},error,,,0,{s['error']}")
+                continue
+                
+            labels = s.get("labels", {})
+            stats = s.get("stats", {})
+            
+            op = labels.get("operation", "")
+            # Find peer from various possible labels
+            peer = labels.get("peer_service", "")
+            if not peer: peer = labels.get("net_peer_name", "")
+            if not peer: peer = labels.get("messaging_system", "")
+            if not peer: peer = labels.get("db_system", "")
+            if not peer and dep_type == "SERVER_IN": peer = "self"
+
+            cat = labels.get("transaction_category", "")
+            
+            # rate queries means value is requests per second
+            # let's just show avg
+            avg_val = stats.get("avg")
+            avg_str = f"{avg_val:.2f}" if avg_val is not None else "0"
+            pts = stats.get("pts", 0)
+            
+            # escape commas
+            op = f'"{op}"' if "," in op else op
+            peer = f'"{peer}"' if "," in peer else peer
+            cat = f'"{cat}"' if "," in cat else cat
+            
+            lines.append(f"{dep_type},{peer},{op},{cat},{pts},{avg_str}")
+            
+    if len(lines) == 2:
+        lines.append("no_data,none,none,none,0,0")
+        
+    return "\n".join(lines)

@@ -13,6 +13,7 @@ EXPECTED_TOOLS = sorted([
     "opsramp_metricsql_batch_query",
     "opsramp_tracing_operation_insights",
     "opsramp_tracing_batch_insights",
+    "opsramp_service_performance_aggregator",
     "opsramp_dashboard_get_variables",
     "opsramp_dashboard_run_tiles_smart",
     "opsramp_dashboard_find",
@@ -24,8 +25,8 @@ EXPECTED_TOOLS = sorted([
 class TestToolRegistration:
     def test_expected_tool_count(self):
         tools = mcp._tool_manager._tools
-        assert len(tools) == 11, (
-            f"Expected 11 tools, got {len(tools)}: {sorted(tools.keys())}"
+        assert len(tools) == 12, (
+            f"Expected 12 tools, got {len(tools)}: {sorted(tools.keys())}"
         )
 
     def test_expected_tools_present(self):

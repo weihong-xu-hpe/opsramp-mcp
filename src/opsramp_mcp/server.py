@@ -31,6 +31,9 @@ from .formatters import (
     format_metricsql_result,
     format_tracing_batch,
     format_tracing_insights,
+    format_service_performance,
+    _extract_metricsql_series,
+    _series_stats,
     parse_time_range,
     rewrite_otel_labels,
 )
@@ -1362,6 +1365,80 @@ async def opsramp_dashboard_find(
     for m in all_results:
         flat_matches.extend(m)
     return format_dashboard_find(flat_matches, search)
+
+
+@mcp.tool()
+async def opsramp_service_performance_aggregator(
+    service_name: str,
+    ctx: Context[ServerSession, AppContext],
+    platform: str = "",
+    tenant: str = "",
+    tenant_id: str = "",
+    start: str = "0",
+    end: str = "0",
+    time_range: str = "15m",
+    output_format: str = "csv",
+    additional_headers: dict[str, str] | None = None,
+) -> str:
+    """
+    Rapidly aggregates the performance of a service by hitting several traces at once.
+    This creates a dependency map of in-bound traffic (SERVER_IN), outbound REST (HTTP_OUT),
+    database and cache operations (DB_CACHE), internal tasks (INTERNAL_BG) and queues (MQ).
+    
+    Args:
+        service_name: Service to scan, e.g. "authz", "enforce".
+        start: Start time in epoch seconds or relative time (e.g., "now-1h"). Default is "0".
+        end: End time in epoch seconds or relative time. Default is "0".
+        time_range: Valid time range, e.g. "15m", "1h", "24h". Defaults to "15m".
+        output_format: Output format, heavily recommend "csv".
+    """
+    platform_cfg = _platform_config(ctx, platform)
+    headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
+    resolved_tenant_id = tenant_id or _resolve_tenant_id(platform_cfg, tenant)
+    client = _client_for_platform(ctx, platform_cfg.name)
+
+    base = f'{{app="default",service_name="{service_name}"'
+    
+    # Define query categories explicitly to match our previous structure mapping.
+    queries = {
+        "SERVER_IN": f'topk(100, sum by (operation) (rate(trace_operations_total{base},kind="server"}}[{time_range}])))',
+        "HTTP_OUT": f'topk(100, sum by (peer_service, net_peer_name, operation) (rate(trace_operations_total{base},kind="client",transaction_category=~"(?i)http"}}[{time_range}])))',
+        "DB_CACHE": f'topk(100, sum by (db_system, peer_service, operation) (rate(trace_operations_total{base},kind="client",transaction_category=~"(?i)database.*|db.*"}}[{time_range}])))',
+        "MQ": f'topk(100, sum by (messaging_system, messaging_destination, operation) (rate(trace_operations_total{base},kind=~"producer|consumer"}}[{time_range}])))',
+        "INTERNAL_BG": f'topk(100, sum by (operation) (rate(trace_operations_total{base},kind="internal"}}[{time_range}])))'
+    }
+
+    results_map: dict[str, list[dict[str, Any]]] = {}
+
+    async def _fetch(dep_category: str, q: str) -> None:
+        try:
+            # Add > 0 to prune zeroes at database level
+            resp = await client.query_metricsql_v3(
+                tenant_id=resolved_tenant_id,
+                query=f'({q}) > 0',
+                start=start,
+                end=end,
+                step=max(60, auto_step(parse_time_range(time_range) or 900)),
+                additional_headers=headers
+            )
+            series = _extract_metricsql_series(resp.get("data", {}))
+            mapped = []
+            for s in series:
+                s_metrics = s.get("metric", {})
+                s_vals = s.get("values", [])
+                mapped.append({
+                    "labels": s_metrics,
+                    "stats": _series_stats(s_vals)
+                })
+            results_map[dep_category] = mapped
+        except Exception as e:
+            results_map[dep_category] = [{"error": str(e)}]
+
+    # Fire concurrently
+    tasks = [_fetch(k, v) for k, v in queries.items()]
+    await asyncio.gather(*tasks)
+
+    return format_service_performance(service_name, results_map, output_format)
 
 
 def main() -> None:
