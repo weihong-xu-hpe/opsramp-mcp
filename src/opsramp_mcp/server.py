@@ -1392,6 +1392,9 @@ async def opsramp_service_performance_aggregator(
         time_range: Valid time range, e.g. "15m", "1h", "24h". Defaults to "15m".
         output_format: Output format, heavily recommend "csv".
     """
+    start, end, step = _resolve_time_range_params(time_range, start, end, 0)
+    step = max(60, step)
+
     platform_cfg = _platform_config(ctx, platform)
     headers = _resolve_headers(platform_cfg, tenant=tenant, additional_headers=additional_headers)
     resolved_tenant_id = tenant_id or _resolve_tenant_id(platform_cfg, tenant)
@@ -1418,10 +1421,10 @@ async def opsramp_service_performance_aggregator(
                 query=f'({q}) > 0',
                 start=start,
                 end=end,
-                step=max(60, auto_step(parse_time_range(time_range) or 900)),
+                step=step,
                 additional_headers=headers
             )
-            series = _extract_metricsql_series(resp.get("data", {}))
+            series = _extract_metricsql_series(resp)
             mapped = []
             for s in series:
                 s_metrics = s.get("metric", {})
