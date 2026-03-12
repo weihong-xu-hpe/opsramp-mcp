@@ -33,6 +33,7 @@ from .formatters import (
     format_tracing_insights,
     format_service_performance,
     _extract_metricsql_series,
+    _last_real,
     _series_stats,
     parse_time_range,
     rewrite_otel_labels,
@@ -1400,46 +1401,90 @@ async def opsramp_service_performance_aggregator(
     resolved_tenant_id = tenant_id or _resolve_tenant_id(platform_cfg, tenant)
     client = _client_for_platform(ctx, platform_cfg.name)
 
-    base = f'{{app="default",service_name="{service_name}"'
-    
-    # Define query categories explicitly to match our previous structure mapping.
-    queries = {
-        "SERVER_IN": f'topk(100, sum by (operation) (rate(trace_operations_total{base},kind="server"}}[{time_range}])))',
-        "HTTP_OUT": f'topk(100, sum by (peer_service, net_peer_name, operation) (rate(trace_operations_total{base},kind="client",transaction_category=~"(?i)http"}}[{time_range}])))',
-        "DB_CACHE": f'topk(100, sum by (db_system, peer_service, operation) (rate(trace_operations_total{base},kind="client",transaction_category=~"(?i)database.*|db.*"}}[{time_range}])))',
-        "MQ": f'topk(100, sum by (messaging_system, messaging_destination, operation) (rate(trace_operations_total{base},kind=~"producer|consumer"}}[{time_range}])))',
-        "INTERNAL_BG": f'topk(100, sum by (operation) (rate(trace_operations_total{base},kind="internal"}}[{time_range}])))'
+    # (kind_filter, extra_peer_labels_for_tput_groupby)
+    _PERF_CATEGORIES: dict[str, tuple[str, str]] = {
+        "SERVER_IN":   ('kind="server"',                                             ''),
+        "HTTP_OUT":    ('kind="client",transaction_category=~"(?i)http"',            'peer_service,net_peer_name,'),
+        "DB_CACHE":    ('kind="client",transaction_category=~"(?i)database.*|db.*"', 'db_system,peer_service,'),
+        "MQ":          ('kind=~"producer|consumer"',                                 'messaging_system,messaging_destination,'),
+        "INTERNAL_BG": ('kind="internal"',                                           ''),
     }
 
     results_map: dict[str, list[dict[str, Any]]] = {}
 
-    async def _fetch(dep_category: str, q: str) -> None:
-        try:
-            # Add > 0 to prune zeroes at database level
+    async def _fetch_category(dep_category: str, kind_filter: str, peer_grp: str) -> None:
+        svc_base = f'app="default",service_name="{service_name}",{kind_filter}'
+        grp_tput = f"{peer_grp}operation"
+
+        tput_q = (
+            f'topk(100, sum by ({grp_tput}) '
+            f'(rate(trace_operations_total{{{svc_base}}}[{time_range}]))) > 0'
+        )
+        lat_inner = (
+            f'sum by (le, operation) '
+            f'(rate(trace_operations_latency_bucket{{{svc_base}}}[{time_range}]))'
+        )
+        p50_q = f'histogram_quantile(0.50, {lat_inner})'
+        p95_q = f'histogram_quantile(0.95, {lat_inner})'
+        p99_q = f'histogram_quantile(0.99, {lat_inner})'
+        err_q = (
+            f'sum by (operation) (rate(trace_operations_total{{{svc_base},status_code="error"}}[{time_range}]))'
+            f' / '
+            f'sum by (operation) (rate(trace_operations_total{{{svc_base}}}[{time_range}]))'
+            f' * 100'
+        )
+
+        async def _q(query: str) -> list[dict[str, Any]]:
             resp = await client.query_metricsql_v3(
                 tenant_id=resolved_tenant_id,
-                query=f'({q}) > 0',
+                query=query,
                 start=start,
                 end=end,
                 step=step,
-                additional_headers=headers
+                additional_headers=headers,
             )
-            series = _extract_metricsql_series(resp)
-            mapped = []
-            for s in series:
-                s_metrics = s.get("metric", {})
-                s_vals = s.get("values", [])
-                mapped.append({
-                    "labels": s_metrics,
-                    "stats": _series_stats(s_vals)
-                })
-            results_map[dep_category] = mapped
+            return _extract_metricsql_series(resp)
+
+        try:
+            tput_series, p50_series, p95_series, p99_series, err_series = await asyncio.gather(
+                _q(tput_q), _q(p50_q), _q(p95_q), _q(p99_q), _q(err_q)
+            )
         except Exception as e:
             results_map[dep_category] = [{"error": str(e)}]
+            return
 
-    # Fire concurrently
-    tasks = [_fetch(k, v) for k, v in queries.items()]
-    await asyncio.gather(*tasks)
+        def _op_map(series_list: list[dict[str, Any]]) -> dict[str, float | None]:
+            lk: dict[str, float | None] = {}
+            for s in series_list:
+                op = s.get("metric", {}).get("operation", "")
+                if op:
+                    lk[op] = _last_real(s.get("values", []))
+            return lk
+
+        p50_map = _op_map(p50_series)
+        p95_map = _op_map(p95_series)
+        p99_map = _op_map(p99_series)
+        err_map = _op_map(err_series)
+
+        mapped = []
+        for s in tput_series:
+            m = s.get("metric", {})
+            op = m.get("operation", "")
+            mapped.append({
+                "labels": m,
+                "stats": _series_stats(s.get("values", [])),
+                "p50_ms": p50_map.get(op),
+                "p95_ms": p95_map.get(op),
+                "p99_ms": p99_map.get(op),
+                "err_pct": err_map.get(op),
+            })
+        results_map[dep_category] = mapped
+
+    # Fire all categories concurrently (5 sub-queries each, 25 total)
+    await asyncio.gather(*(
+        _fetch_category(cat, kf, pg)
+        for cat, (kf, pg) in _PERF_CATEGORIES.items()
+    ))
 
     return format_service_performance(service_name, results_map, output_format)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 from typing import Any
 
@@ -278,6 +279,18 @@ def _series_stats(values: list[list[Any]]) -> dict[str, Any]:
         "first": floats[0],
         "last": floats[-1],
     }
+
+
+def _last_real(values: list[list[Any]]) -> float | None:
+    """Return the last non-NaN, non-Inf finite float from [[ts, val], ...] pairs."""
+    for _ts, v in reversed(values):
+        try:
+            f = float(v)
+            if math.isfinite(f):
+                return f
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 def _humanize_number(n: float) -> str:
@@ -669,47 +682,58 @@ def format_service_performance(
     """Format aggregated service performance data."""
     if fmt == "json":
         return _json({service_name: results_map})
-        
+
+    def _ms(v: float | None) -> str:
+        return f"{v:.1f}" if v is not None else ""
+
+    def _pct(v: float | None) -> str:
+        return f"{v:.2f}" if v is not None else ""
+
     lines = []
     lines.append(f"# Service Performance: {service_name}")
-    lines.append("Dependency_Type,Target_Peer,Operation,Transaction_Category,Data_Points,Throughput_Rate")
-    
+    lines.append(
+        "Dependency_Type,Target_Peer,Operation,Transaction_Category,"
+        "Data_Points,Throughput_rps,p50_ms,p95_ms,p99_ms,err_pct"
+    )
+
     for dep_type, series_list in results_map.items():
         if not series_list:
             continue
-            
+
         for s in series_list:
             if "error" in s:
-                lines.append(f"{dep_type},error,,,0,{s['error']}")
+                lines.append(f"{dep_type},error,,,0,{s['error']},,,,")
                 continue
-                
+
             labels = s.get("labels", {})
             stats = s.get("stats", {})
-            
-            op = labels.get("operation", "")
-            # Find peer from various possible labels
-            peer = labels.get("peer_service", "")
-            if not peer: peer = labels.get("net_peer_name", "")
-            if not peer: peer = labels.get("messaging_system", "")
-            if not peer: peer = labels.get("db_system", "")
-            if not peer and dep_type == "SERVER_IN": peer = "self"
 
+            op = labels.get("operation", "")
+            peer = (
+                labels.get("peer_service")
+                or labels.get("net_peer_name")
+                or labels.get("messaging_system")
+                or labels.get("db_system")
+                or ("self" if dep_type == "SERVER_IN" else "")
+            )
             cat = labels.get("transaction_category", "")
-            
-            # rate queries means value is requests per second
-            # let's just show avg
+
             avg_val = stats.get("avg")
-            avg_str = f"{avg_val:.2f}" if avg_val is not None else "0"
+            avg_str = f"{avg_val:.4f}" if avg_val else "0"
             pts = stats.get("pts", 0)
-            
-            # escape commas
-            op = f'"{op}"' if "," in op else op
+
+            # escape commas in string fields
+            op   = f'"{op}"'   if "," in op   else op
             peer = f'"{peer}"' if "," in peer else peer
-            cat = f'"{cat}"' if "," in cat else cat
-            
-            lines.append(f"{dep_type},{peer},{op},{cat},{pts},{avg_str}")
-            
+            cat  = f'"{cat}"'  if "," in cat  else cat
+
+            lines.append(
+                f"{dep_type},{peer},{op},{cat},{pts},{avg_str},"
+                f"{_ms(s.get('p50_ms'))},{_ms(s.get('p95_ms'))},"
+                f"{_ms(s.get('p99_ms'))},{_pct(s.get('err_pct'))}"
+            )
+
     if len(lines) == 2:
-        lines.append("no_data,none,none,none,0,0")
-        
+        lines.append("no_data,none,none,none,0,0,,,,")
+
     return "\n".join(lines)
